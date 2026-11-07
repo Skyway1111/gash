@@ -126,7 +126,9 @@ How it behaves:
   Developer Mode), `env` and `xargs` (they can't start shell scripts), and those whose results
   differ: `ls` and `stat` (dotfiles, the hidden attribute, modes), `du` (`\` in paths), `touch`
   (`-d` times taken as UTC), `comm` and `join` (they expect another order than GNU `sort`),
-  `md5sum` and the other checksums (no `*` marker), `fmt`, `pr`, `ptx` and `sum`. Recursive
+  `md5sum` and the other checksums (no `*` marker), `fmt`, `pr`, `ptx` and `sum`, `rm` (it
+  can't remove junctions or directory symlinks) and `cp` (`-r` makes native links where the
+  runtime copies their targets). Recursive
   `grep` (`-r`, `-R`, `-d recurse`; it would print `\` in paths) and commands given `/dev/...`
   or `/proc/...` paths run the GNU tool too. gash builtins such as `echo`, `printf`, `test` and
   `pwd` are unaffected.

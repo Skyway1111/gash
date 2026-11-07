@@ -71,7 +71,9 @@ fn make(exe: PathBuf) -> Coreutils {
 /// hidden attribute, shows every mode as rwx), `stat` (same modes), `du` (`\` in paths),
 /// `touch` (takes `-d` times as UTC), `comm`, `join` (expect a different order than GNU
 /// `sort`), `md5sum` and the other checksums (no `*` binary marker), `fmt`, `pr`, `ptx`, `sum`
-/// (other layouts); recursive `grep` (`\` in paths, see `grep_recursive`); and gash builtins.
+/// (other layouts), `rm` (can't remove junctions or directory symlinks), `cp` (`-r` makes
+/// native links where the runtime copies their targets; symlinks need Developer Mode);
+/// recursive `grep` (`\` in paths, see `grep_recursive`); and gash builtins.
 const UTILS: &[(&str, ArgPolicy)] = {
     use ArgPolicy::*;
     &[
@@ -80,9 +82,9 @@ const UTILS: &[(&str, ArgPolicy)] = {
         ("yes", Strings), ("factor", Strings), ("numfmt", Strings), ("sleep", Strings), ("printenv", Strings),
         ("pathchk", Strings), ("arch", Strings), ("nproc", Strings), ("hostname", Strings), ("uptime", Strings),
         ("date", Strings),
-        ("base32", Files), ("base64", Files), ("basenc", Files), ("cat", Files), ("cksum", Files), ("cp", Files),
+        ("base32", Files), ("base64", Files), ("basenc", Files), ("cat", Files), ("cksum", Files),
         ("csplit", Files), ("cut", Files), ("df", Files), ("fold", Files), ("head", Files), ("link", Files),
-        ("mkdir", Files), ("mv", Files), ("nl", Files), ("od", Files), ("paste", Files), ("rm", Files),
+        ("mkdir", Files), ("mv", Files), ("nl", Files), ("od", Files), ("paste", Files),
         ("rmdir", Files), ("shuf", Files), ("split", Files), ("tac", Files), ("tail", Files), ("tee", Files),
         ("truncate", Files), ("tsort", Files), ("unexpand", Files), ("uniq", Files), ("unlink", Files), ("wc", Files),
     ]
