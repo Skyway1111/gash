@@ -97,6 +97,32 @@ fn has_path_sep(name: &str) -> bool {
     name.contains('/') || name.contains('\\') || path::is_windows_abs(name)
 }
 
+/// Windows caps a command line at 32,767 characters. Past this length (program and arguments,
+/// counted in UTF-8 bytes, which is never less than the UTF-16 length) arguments for an MSYS
+/// program go in a response file instead.
+const MSYS_CMDLINE_MAX: usize = 30_000;
+
+/// Add `args`, already quoted with `msys_quote`, to an MSYS program's command line. When they
+/// would make it longer than Windows allows, they go in a response file and the program gets
+/// `@"<file>"`, which the MSYS runtime replaces with the file's contents, parsed like a
+/// command line. (Git Bash hands arguments from one MSYS process to the next without the
+/// Windows command line, so it has no such limit.) Returns that file: keep it until the
+/// program has read it.
+fn add_msys_args(cmd: &mut Proc, program: &Path, args: Vec<String>) -> Option<std::fs::File> {
+    let len = program.as_os_str().len() + args.iter().map(|a| a.len() + 1).sum::<usize>();
+    if len > MSYS_CMDLINE_MAX {
+        if let Ok((f, file)) = crate::io::response_file(args.join(" ").as_bytes()) {
+            // The quote goes after the @: a quoted @ is taken literally.
+            cmd.raw_arg(format!("@\"{}\"", file.display()));
+            return Some(f);
+        }
+    }
+    for a in args {
+        cmd.raw_arg(a);
+    }
+    None
+}
+
 /// Quote an argument for an MSYS2/Cygwin program started from a native process
 /// (whose runtime re-parses the command line with globbing).
 pub fn msys_quote(a: &str) -> String {
@@ -1503,6 +1529,8 @@ impl Shell {
                 return r;
             }
         }
+        // The arguments of an MSYS program, when they are too long for a command line.
+        let mut rsp: Option<std::fs::File> = None;
         let mut cmd;
         let native;
         let mut msys_child = false;
@@ -1574,9 +1602,7 @@ impl Shell {
                 let fname = res.path.file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default();
                 let same = !has_path_sep(typed) && (fname == typed.to_lowercase() || fname == format!("{}.exe", typed.to_lowercase()));
                 cmd = if same && !assigns.iter().any(|(k, _)| k == "PATH") { Proc::new(typed) } else { Proc::new(&res.path) };
-                for a in &argv[1..] {
-                    cmd.raw_arg(msys_quote(a));
-                }
+                rsp = add_msys_args(&mut cmd, &res.path, argv[1..].iter().map(|a| msys_quote(a)).collect());
                 native = false;
                 msys_child = true;
             }
@@ -1601,10 +1627,10 @@ impl Shell {
                 }
                 args.push(if msys { path::to_posix(&res.path) } else { res.path.to_string_lossy().into_owned() });
                 args.extend(argv[1..].iter().cloned());
-                for a in &args {
-                    if msys {
-                        cmd.raw_arg(msys_quote(a));
-                    } else {
+                if msys {
+                    rsp = add_msys_args(&mut cmd, &ip, args.iter().map(|a| msys_quote(a)).collect());
+                } else {
+                    for a in &args {
                         cmd.arg(conv(a));
                     }
                 }
@@ -1693,6 +1719,16 @@ impl Shell {
             crate::io::append_started(&appends, &child);
         }
         if self.spawn_only {
+            if let Some(f) = rsp.take() {
+                // The program reads its response file as it starts; keep the file until it exits.
+                if let Ok(h) = std::os::windows::io::AsHandle::as_handle(&child).try_clone_to_owned() {
+                    std::thread::spawn(move || {
+                        let raw = std::os::windows::io::AsRawHandle::as_raw_handle(&h) as crate::sys::HANDLE;
+                        unsafe { crate::sys::WaitForSingleObject(raw, u32::MAX) }; // INFINITE
+                        drop(f);
+                    });
+                }
+            }
             self.spawned = Some(child);
             return Ok(0);
         }

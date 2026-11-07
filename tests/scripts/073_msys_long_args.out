@@ -1,0 +1,14 @@
+args=1200 chars=49293
+1200
+ls: 0
+cat: 0
+background ls: 0
+[xxxxxxxxxxxxx
+[a b]
+[it's]
+[back\slash]
+["quoted"]
+[@at]
+[*]
+[]
+native: 126

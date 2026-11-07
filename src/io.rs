@@ -123,6 +123,20 @@ impl MemReader {
 /// A new temporary file that Windows deletes once the last handle to it, ours or a
 /// child's, is closed.
 fn temp_file() -> io::Result<File> {
+    temp_file_named("gash-heredoc").map(|(f, _)| f)
+}
+
+/// A response file holding `content`, for an MSYS program to read through an `@file`
+/// argument (see `exec::add_msys_args`). Windows deletes it once the last handle is closed.
+pub fn response_file(content: &[u8]) -> io::Result<(File, std::path::PathBuf)> {
+    let (mut f, path) = temp_file_named("gash-args")?;
+    f.write_all(content)?;
+    f.flush()?;
+    Ok((f, path))
+}
+
+/// Like `temp_file`, and also returns the path. The file name starts with `prefix`.
+fn temp_file_named(prefix: &str) -> io::Result<(File, std::path::PathBuf)> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU32, Ordering};
     const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x100;
@@ -136,11 +150,13 @@ fn temp_file() -> io::Result<File> {
     let mut last = None;
     for _ in 0..16 {
         let name = format!(
-            "gash-heredoc-{}-{}-{:08x}.tmp",
+            "{}-{}-{}-{:08x}.tmp",
+            prefix,
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed),
             nanos
         );
+        let path = dir.join(name);
         match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -148,9 +164,9 @@ fn temp_file() -> io::Result<File> {
             .share_mode(0x7) // read | write | delete
             .attributes(FILE_ATTRIBUTE_TEMPORARY)
             .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
-            .open(dir.join(name))
+            .open(&path)
         {
-            Ok(f) => return Ok(f),
+            Ok(f) => return Ok((f, path)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = Some(e),
             Err(e) => return Err(e),
         }
