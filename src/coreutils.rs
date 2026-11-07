@@ -95,15 +95,20 @@ pub fn util(name: &str) -> Option<(&'static str, ArgPolicy)> {
     UTILS.iter().find(|(n, _)| *n == name).copied()
 }
 
-/// Must Git's GNU `util` run these arguments instead? Recursive grep prints `\` paths, and
-/// paths only the MSYS runtime provides (`/dev/...`, `/proc/...`; native tools can't read `nul`)
-/// mean nothing to a native program.
+/// Must Git's GNU `util` run these arguments instead? Recursive grep prints `\` paths, paths
+/// only the MSYS runtime provides (`/dev/...`, `/proc/...`; native tools can't read `nul`) mean
+/// nothing to a native program, and a native command line can't exceed 32,767 characters, where
+/// an MSYS program gets its arguments in a response file.
 pub fn keep_gnu(util: &str, args: &[String]) -> bool {
     let msys_only = |a: &String| {
         let p = a.split_once('=').map_or(a.as_str(), |(_, v)| v);
         p.starts_with("/dev/") || p == "/proc" || p.starts_with("/proc/")
     };
-    (util == "grep" && grep_recursive(args)) || args.iter().any(msys_only)
+    let too_long = || {
+        let policy = self::util(util).map_or(ArgPolicy::Files, |(_, p)| p);
+        translate_args(policy, args).iter().map(|a| msvc_quote(a).len() + 1).sum::<usize>() > 32_000
+    };
+    (util == "grep" && grep_recursive(args)) || args.iter().any(msys_only) || too_long()
 }
 
 /// Does this grep command line search directories (`-r`, `-R`, `-d recurse`)? Options may
