@@ -128,7 +128,8 @@ fn temp_file() -> io::Result<File> {
     const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x100;
     const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x0400_0000;
     static SEQ: AtomicU32 = AtomicU32::new(0);
-    let dir = std::env::temp_dir();
+    // The folder behind /tmp, which is created or replaced when the one TMP names doesn't exist.
+    let dir = &crate::path::mounts().temp;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())

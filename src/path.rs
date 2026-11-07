@@ -1,6 +1,6 @@
 //! POSIX <-> Windows path translation, emulating the MSYS2/Git-for-Windows mount table:
 //!   /c/foo        -> C:\foo
-//!   /tmp          -> %TEMP%
+//!   /tmp          -> %TMP%, else %TEMP% (see `pick_temp`)
 //!   /bin, /lib    -> <root>\usr\bin, <root>\usr\lib
 //!   /usr/...      -> <root>\usr\...
 //!   /dev/null     -> NUL
@@ -76,13 +76,44 @@ pub fn find_msys_root() -> PathBuf {
     PathBuf::from(r"C:\Program Files\Git")
 }
 
+/// The folder behind `/tmp`: the one the MSYS runtime mounts there.
+///
+/// MSYS builds its `/tmp` mount (`usertemp` in /etc/fstab) from GetTempPathW, which takes TMP,
+/// then TEMP, then USERPROFILE, then the Windows folder, and makes the value a full path. So a
+/// launcher that passes `TMP=/tmp` gets `C:\tmp` (on the current drive) in every MSYS process it
+/// starts, and gash must use the same folder to agree with them about what is in `/tmp` (issue
+/// #27).
+///
+/// MSYS mounts that folder whether or not it exists, and an MSYS program that started earlier with
+/// the same environment may already be using it as `/tmp`, so a missing folder is created rather
+/// than replaced. Only when that fails does gash take Windows' default per-user temp folder, and
+/// `<root>\tmp` as a last resort: it is read-only for most users of a Git installed under Program
+/// Files. MSYS programs gash starts get TMP/TEMP set to the folder chosen here, so they agree with
+/// gash unless another MSYS process already running set up `/tmp` differently.
+fn pick_temp(root: &Path) -> PathBuf {
+    let mut temp = crate::sys::temp_path().unwrap_or_default().into_os_string().into_string().unwrap_or_default();
+    while temp.len() > 3 && temp.ends_with(['\\', '/']) {
+        temp.pop();
+    }
+    let temp = PathBuf::from(temp);
+    if temp.is_absolute() && (temp.is_dir() || std::fs::create_dir_all(&temp).is_ok()) {
+        return temp;
+    }
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| Path::new(&p).join("AppData").join("Local")));
+    if let Some(local) = local {
+        let p = local.join("Temp");
+        if p.is_absolute() && p.is_dir() {
+            return p;
+        }
+    }
+    root.join("tmp")
+}
+
 pub fn init() {
     let root = find_msys_root();
-    let temp = std::env::var("TEMP")
-        .or_else(|_| std::env::var("TMP"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| root.join("tmp"));
-    let temp = if temp.is_dir() { temp } else { root.join("tmp") };
+    let temp = pick_temp(&root);
     let root_lc = norm_lc(&root);
     let temp_lc = norm_lc(&temp);
     let msys_bins = vec![norm_lc(&root.join("usr").join("bin")), norm_lc(&root.join("bin"))];
@@ -92,7 +123,7 @@ pub fn init() {
 pub fn mounts() -> &'static Mounts {
     MOUNTS.get_or_init(|| {
         let root = find_msys_root();
-        let temp = std::env::temp_dir();
+        let temp = pick_temp(&root);
         Mounts {
             root_lc: norm_lc(&root),
             temp_lc: norm_lc(&temp),
