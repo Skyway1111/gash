@@ -73,6 +73,7 @@ extern "system" {
     pub fn GetConsoleWindow() -> HANDLE;
     pub fn SetConsoleTitleW(title: *const u16) -> BOOL;
     pub fn GetLastError() -> DWORD;
+    fn GetTempPathW(len: DWORD, buf: *mut u16) -> DWORD;
     pub fn ReOpenFile(h: HANDLE, access: DWORD, share: DWORD, flags: DWORD) -> HANDLE;
     pub fn SetStdHandle(n: DWORD, h: HANDLE) -> BOOL;
     pub fn SetFilePointerEx(h: HANDLE, dist: i64, new_pos: *mut i64, method: DWORD) -> BOOL;
@@ -468,6 +469,25 @@ pub fn user_name() -> String {
         }
     }
     "user".into()
+}
+
+/// The temporary folder as GetTempPathW gives it (TMP, then TEMP, then USERPROFILE, then the
+/// Windows folder, as a full path ending in `\`). This is what the MSYS runtime mounts at `/tmp`.
+/// Unlike `std::env::temp_dir`, which calls GetTempPath2W, it honors TMP/TEMP when running as
+/// SYSTEM too.
+pub fn temp_path() -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    let mut buf = vec![0u16; 261];
+    loop {
+        let n = unsafe { GetTempPathW(buf.len() as DWORD, buf.as_mut_ptr()) } as usize;
+        if n == 0 {
+            return None;
+        }
+        if n < buf.len() {
+            return Some(std::ffi::OsString::from_wide(&buf[..n]).into());
+        }
+        buf.resize(n, 0);
+    }
 }
 
 pub fn host_name() -> String {

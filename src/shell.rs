@@ -1090,7 +1090,7 @@ impl Shell {
     /// which reads TMP/TEMP, and `TMP=/tmp` makes that `C:\tmp`. All running MSYS processes of
     /// an installation share one mount table, so the first to start decides `/tmp` for the rest.
     /// MSYS turns TMP/TEMP back into POSIX form at startup, so the program still sees `/tmp`.
-    /// A child gash also reads TEMP to find the folder behind `/tmp`.
+    /// A child gash also reads TMP/TEMP to find the folder behind `/tmp`.
     pub fn child_env(&mut self, extra: &[(String, String)], native: bool) -> Vec<(String, String)> {
         let mut out: Vec<(String, String)> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();

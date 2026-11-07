@@ -66,10 +66,18 @@ by real Git Bash) passes 100%. Supported:
 
 ### Windows/MSYS integration
 
-- Paths: `/c/foo` ↔ `C:\foo`, `/tmp` → `%TEMP%`, `/usr/bin`, `/bin`, `/ucrt64` → Git's
-  install dir, `/dev/null`, `/dev/stdin|stdout|stderr|fd/N`, `/dev/tty`. Windows paths
+- Paths: `/c/foo` ↔ `C:\foo`, `/tmp` → `%TMP%` (see below), `/usr/bin`, `/bin`, `/ucrt64` →
+  Git's install dir, `/dev/null`, `/dev/stdin|stdout|stderr|fd/N`, `/dev/tty`. Windows paths
   (`C:\x`, `C:/x`) work everywhere too. `$PWD` and `pwd` show the MSYS form, `pwd -W` the
   Windows one (`C:/...`).
+- `/tmp` is the folder the MSYS runtime mounts there, which Windows' GetTempPathW gives at
+  startup: `TMP`, else `TEMP`, else your profile folder (`%USERPROFILE%`), else the Windows
+  folder. A value in MSYS form such as `TMP=/tmp` therefore means `\tmp` on the current drive,
+  as it does for Git Bash. gash creates that folder if it doesn't exist, and only if it can't
+  uses `%LOCALAPPDATA%\Temp` instead. Programs gash starts get `TMP` and `TEMP` set to the same
+  folder. MSYS programs still see another `/tmp` if an MSYS process from the same Git install
+  was already running with different `TMP`/`TEMP` values: they share one mount table, and the
+  first process to start sets `/tmp` for all of them.
 - PATH is kept in MSYS form inside the shell and converted when launching programs.
 - Arguments to native programs get MSYS2-style path conversion (`/c/x` → `C:/x`),
   honoring `MSYS_NO_PATHCONV` and `MSYS2_ARG_CONV_EXCL` when they are exported or given as
