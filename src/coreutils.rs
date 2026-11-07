@@ -65,25 +65,92 @@ fn make(exe: PathBuf) -> Coreutils {
 
 /// Utilities that gash routes to Microsoft Coreutils, with their argument policy.
 ///
-/// Deliberately not routed (Git's GNU versions are kept):
-/// `sort`, `find` (ambiguous with DOS commands; default to DOS behaviour without an
-/// HKLM setting), `mktemp`, `realpath`, `readlink` (print Windows paths that scripts then
-/// manipulate), `ln` (native symlinks need Developer Mode), `env`, `xargs` (can't start
-/// shell scripts), and anything that is a gash builtin anyway (echo, printf, test, pwd, ...).
-pub fn policy(util: &str) -> Option<ArgPolicy> {
+/// Kept on Git's GNU versions: `sort`, `find` (ambiguous with DOS commands), `mktemp`,
+/// `realpath`, `readlink` (print Windows paths), `ln` (native symlinks need Developer Mode),
+/// `env`, `xargs` (can't start shell scripts); `ls` (lists dotfiles, hides files with the
+/// hidden attribute, shows every mode as rwx), `stat` (same modes), `du` (`\` in paths),
+/// `touch` (takes `-d` times as UTC), `comm`, `join` (expect a different order than GNU
+/// `sort`), `md5sum` and the other checksums (no `*` binary marker), `fmt`, `pr`, `ptx`, `sum`
+/// (other layouts); recursive `grep` (`\` in paths, see `grep_recursive`); and gash builtins.
+const UTILS: &[(&str, ArgPolicy)] = {
     use ArgPolicy::*;
-    Some(match util {
-        "grep" => Grep,
-        "basename" | "dirname" | "expr" | "seq" | "tr" | "yes" | "factor" | "numfmt" | "sleep" | "printenv"
-        | "pathchk" | "arch" | "nproc" | "hostname" | "uptime" | "date" => Strings,
-        "b2sum" | "base32" | "base64" | "basenc" | "cat" | "cksum" | "comm" | "cp" | "csplit" | "cut" | "df" | "du"
-        | "fmt" | "fold" | "head" | "join" | "link" | "ls" | "md5sum" | "mkdir" | "mv" | "nl" | "od" | "paste" | "pr"
-        | "ptx" | "rm" | "rmdir" | "sha1sum" | "sha224sum" | "sha256sum" | "sha384sum" | "sha512sum" | "shuf"
-        | "split" | "stat" | "sum" | "tac" | "tail" | "tee" | "touch" | "truncate" | "tsort" | "unexpand" | "uniq"
-        | "unlink" | "wc" => Files,
-        _ => return None,
-    })
+    &[
+        ("grep", Grep),
+        ("basename", Strings), ("dirname", Strings), ("expr", Strings), ("seq", Strings), ("tr", Strings),
+        ("yes", Strings), ("factor", Strings), ("numfmt", Strings), ("sleep", Strings), ("printenv", Strings),
+        ("pathchk", Strings), ("arch", Strings), ("nproc", Strings), ("hostname", Strings), ("uptime", Strings),
+        ("date", Strings),
+        ("base32", Files), ("base64", Files), ("basenc", Files), ("cat", Files), ("cksum", Files), ("cp", Files),
+        ("csplit", Files), ("cut", Files), ("df", Files), ("fold", Files), ("head", Files), ("link", Files),
+        ("mkdir", Files), ("mv", Files), ("nl", Files), ("od", Files), ("paste", Files), ("rm", Files),
+        ("rmdir", Files), ("shuf", Files), ("split", Files), ("tac", Files), ("tail", Files), ("tee", Files),
+        ("truncate", Files), ("tsort", Files), ("unexpand", Files), ("uniq", Files), ("unlink", Files), ("wc", Files),
+    ]
+};
+
+/// A routed utility's `'static` name and argument policy.
+pub fn util(name: &str) -> Option<(&'static str, ArgPolicy)> {
+    UTILS.iter().find(|(n, _)| *n == name).copied()
 }
+
+/// Must Git's GNU `util` run these arguments instead? Recursive grep prints `\` paths, and
+/// paths only the MSYS runtime provides (`/dev/...`, `/proc/...`; native tools can't read `nul`)
+/// mean nothing to a native program.
+pub fn keep_gnu(util: &str, args: &[String]) -> bool {
+    let msys_only = |a: &String| {
+        let p = a.split_once('=').map_or(a.as_str(), |(_, v)| v);
+        p.starts_with("/dev/") || p == "/proc" || p.starts_with("/proc/")
+    };
+    (util == "grep" && grep_recursive(args)) || args.iter().any(msys_only)
+}
+
+/// Does this grep command line search directories (`-r`, `-R`, `-d recurse`)? Options may
+/// follow operands, as with GNU getopt.
+fn grep_recursive(args: &[String]) -> bool {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--" {
+            return false;
+        }
+        if let Some(long) = a.strip_prefix("--") {
+            let (name, value) = match long.split_once('=') {
+                Some((n, v)) => (n, Some(v.to_string())),
+                None => (long, None),
+            };
+            if name == "recursive" || name == "dereference-recursive" {
+                return true;
+            }
+            let takes_value = GREP_LONG_WITH_VALUE.contains(&a.split('=').next().unwrap_or(a));
+            let value = if takes_value && value.is_none() { it.next().cloned() } else { value };
+            if name == "directories" && value.as_deref() == Some("recurse") {
+                return true;
+            }
+        } else if a.len() > 1 && a.starts_with('-') {
+            for (k, c) in a[1..].char_indices() {
+                if c == 'r' || c == 'R' {
+                    return true;
+                }
+                if GREP_SHORT_WITH_VALUE.contains(c) {
+                    let rest = &a[1 + k + c.len_utf8()..];
+                    let value = if rest.is_empty() { it.next().map(String::as_str) } else { Some(rest) };
+                    if c == 'd' && value == Some("recurse") {
+                        return true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// grep options whose value is a separate argument.
+const GREP_SHORT_WITH_VALUE: &str = "efmABCdD";
+const GREP_LONG_WITH_VALUE: &[&str] = &[
+    "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--devices",
+    "--directories", "--label", "--include", "--exclude", "--exclude-dir", "--exclude-from", "--binary-files",
+    "--group-separator",
+];
 
 impl Coreutils {
     /// Executable to run for `util`: a hard link named after it (created or refreshed on
@@ -108,20 +175,8 @@ impl Coreutils {
             return None;
         }
         let stem = p.file_stem()?.to_str()?.to_ascii_lowercase();
-        static_name(&stem)
+        util(&stem).map(|(n, _)| n)
     }
-}
-
-/// Map a utility name to a `'static` str if it's routable.
-pub fn static_name(name: &str) -> Option<&'static str> {
-    const ALL: &[&str] = &[
-        "grep", "basename", "dirname", "expr", "seq", "tr", "yes", "factor", "numfmt", "sleep", "printenv", "pathchk",
-        "arch", "nproc", "hostname", "uptime", "date", "b2sum", "base32", "base64", "basenc", "cat", "cksum", "comm", "cp",
-        "csplit", "cut", "df", "du", "fmt", "fold", "head", "join", "link", "ls", "md5sum", "mkdir", "mv", "nl", "od",
-        "paste", "pr", "ptx", "rm", "rmdir", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum", "shuf",
-        "split", "stat", "sum", "tac", "tail", "tee", "touch", "truncate", "tsort", "unexpand", "uniq", "unlink", "wc",
-    ];
-    ALL.iter().copied().find(|u| *u == name)
 }
 
 fn same_file_data(a: &Path, b: &Path) -> bool {
@@ -161,13 +216,8 @@ pub fn translate_args(policy: ArgPolicy, args: &[String]) -> Vec<String> {
             out
         }
         ArgPolicy::Grep => {
-            // options whose value is a separate argument
-            const SHORT_WITH_VALUE: &str = "efmABCdD";
-            const LONG_WITH_VALUE: &[&str] = &[
-                "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--devices",
-                "--directories", "--label", "--include", "--exclude", "--exclude-dir", "--exclude-from", "--binary-files",
-                "--group-separator",
-            ];
+            const SHORT_WITH_VALUE: &str = GREP_SHORT_WITH_VALUE;
+            const LONG_WITH_VALUE: &[&str] = GREP_LONG_WITH_VALUE;
             let mut out = Vec::with_capacity(args.len());
             let mut pattern_given = args.iter().any(|a| {
                 a == "-e" || a == "-f" || a.starts_with("--regexp") || a.starts_with("--file") || {

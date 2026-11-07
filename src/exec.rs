@@ -1562,6 +1562,20 @@ impl Shell {
                 return r;
             }
         }
+        // Some command lines run Git's GNU tool after all (see `coreutils::keep_gnu`).
+        let gnu;
+        let res = match res.util {
+            Some(u) if res.kind == ExeKind::Coreutils && crate::coreutils::keep_gnu(u, &argv[1..]) => {
+                let p = path::mounts().root.join(r"usr\bin").join(format!("{u}.exe"));
+                if p.is_file() {
+                    gnu = Resolved { path: p, kind: ExeKind::Msys, interp: None, util: None, opts: Vec::new() };
+                    &gnu
+                } else {
+                    res
+                }
+            }
+            _ => res,
+        };
         // The arguments of an MSYS program, when they are too long for a command line.
         let mut rsp: Option<std::fs::File> = None;
         let mut msys_env: Option<String> = None;
@@ -1617,13 +1631,11 @@ impl Shell {
             }
             ExeKind::Coreutils => {
                 // Standing in for an MSYS tool: always translate MSYS paths (per-utility policy).
-                let util = res.util.unwrap_or("");
-                let policy = crate::coreutils::policy(util).unwrap_or(crate::coreutils::ArgPolicy::Files);
-                cmd = Proc::new(&res.path);
-                let is_multicall = res.path.file_stem().map(|s| s.eq_ignore_ascii_case("coreutils")).unwrap_or(false);
-                if is_multicall {
-                    cmd.raw_arg(util);
-                }
+                // Started as `coreutils <util>`, which names itself `util` in messages (its
+                // per-utility links say `util.exe`).
+                let (util, policy) = res.util.and_then(crate::coreutils::util).unwrap_or(("", crate::coreutils::ArgPolicy::Files));
+                cmd = Proc::new(&crate::coreutils::get().map_or(res.path.clone(), |cu| cu.exe.clone()));
+                cmd.raw_arg(util);
                 for a in crate::coreutils::translate_args(policy, &argv[1..]) {
                     cmd.raw_arg(crate::coreutils::msvc_quote(&a));
                 }
@@ -2123,8 +2135,8 @@ fn prefer_native_coreutils(r: Resolved) -> Resolved {
         Some(s) => s.to_ascii_lowercase(),
         None => return r,
     };
-    match crate::coreutils::static_name(&stem) {
-        Some(util) if path::is_msys_binary(&r.path) => {
+    match crate::coreutils::util(&stem) {
+        Some((util, _)) if path::is_msys_binary(&r.path) => {
             Resolved { path: cu.program(util), kind: ExeKind::Coreutils, interp: None, util: Some(util), opts: Vec::new() }
         }
         _ => r,

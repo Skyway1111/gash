@@ -98,9 +98,10 @@ by real Git Bash) passes 100%. Supported:
 
 If [Microsoft's Coreutils for Windows](https://github.com/microsoft/coreutils) (native uutils
 builds of coreutils, findutils and grep) is available, gash uses it in place of Git's MSYS
-versions of the same tools. Native tools start faster and avoid the MSYS runtime; on a script
-that calls `grep`/`head`/`tail`/`wc`/`cut`/`uniq` in a loop this measured about 15–25% faster
-end to end.
+versions of the same tools. Native tools start faster and avoid the MSYS runtime, whose first
+program in a fresh process tree pays its startup: a fresh `gash -c` running a short
+`grep | head | cut; wc` pipeline measured about twice as fast, and a script that calls
+`grep`/`head`/`tail`/`wc`/`cut`/`uniq` in a loop about 15–25% faster.
 
 gash looks for `coreutils.exe` in this order:
 
@@ -113,7 +114,8 @@ How it behaves:
 - Only commands that PATH lookup would resolve to Git's `/usr/bin` are swapped, so anything you
   put earlier on PATH, or call by full path (`/usr/bin/cat`), still wins.
 - gash creates per-command hard links next to `coreutils.exe` (`bin\cat.exe`, ...) on first
-  use, so `command -v cat` prints a path that really runs `cat`.
+  use, so `command -v cat` prints a path that really runs `cat`. It starts the tools as
+  `coreutils.exe cat ...`, so their messages say `cat:`.
 - MSYS paths in arguments are translated for the native tools even when `MSYS_NO_PATHCONV` is
   set (the caller asked for an MSYS tool), with a per-command policy: file operands are
   converted, while `tr` sets, `basename`/`dirname`/`expr` strings and `grep` patterns are
@@ -121,12 +123,18 @@ How it behaves:
 - Arguments with wildcards are quoted so the native tools don't glob them a second time.
 - Kept on Git's GNU versions: `sort` and `find` (they can switch to the DOS commands' behaviour),
   `mktemp`, `realpath`, `readlink` (they print Windows paths), `ln` (native symlinks need
-  Developer Mode), `env` and `xargs` (they can't start shell scripts). gash builtins such as
-  `echo`, `printf`, `test` and `pwd` are unaffected.
+  Developer Mode), `env` and `xargs` (they can't start shell scripts), and those whose results
+  differ: `ls` and `stat` (dotfiles, the hidden attribute, modes), `du` (`\` in paths), `touch`
+  (`-d` times taken as UTC), `comm` and `join` (they expect another order than GNU `sort`),
+  `md5sum` and the other checksums (no `*` marker), `fmt`, `pr`, `ptx` and `sum`. Recursive
+  `grep` (`-r`, `-R`, `-d recurse`; it would print `\` in paths) and commands given `/dev/...`
+  or `/proc/...` paths run the GNU tool too. gash builtins such as `echo`, `printf`, `test` and
+  `pwd` are unaffected.
 
 Limitations: native tools can't create or open file names containing `* ? : " < > |`, which the
-MSYS runtime supports by remapping them (native `touch` also stops at the first such error), and
-tools that echo absolute paths they were given print them as `C:/...` rather than `/c/...`.
+MSYS runtime supports by remapping them; tools that echo absolute paths they were given print
+them as `C:/...` rather than `/c/...`; error messages use Windows wording ("The system cannot find
+the file specified."); and `grep` reports a binary file match on stderr, as GNU grep 3.5+ does.
 
 ## Installing
 
