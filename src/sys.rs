@@ -163,8 +163,39 @@ const FILE_APPEND_DATA: DWORD = 0x0004;
 const FILE_GENERIC_READ: DWORD = 0x0012_0089;
 const FILE_GENERIC_WRITE: DWORD = 0x0012_0116;
 const FILE_ACCESS_INFORMATION: u32 = 8;
+const FILE_POSITION_INFORMATION: u32 = 14;
 const FILE_SHARE_ALL: DWORD = 0x7; // read | write | delete
 const FILE_END: DWORD = 2;
+
+/// The position of `h`'s file object. `SetFilePointerEx(h, 0, FILE_CURRENT)`, what
+/// `stream_position` does, sets the position it has just read, so when a program sharing the
+/// handle writes in between, it moves the position back over that write, and the next write
+/// lands on top of it. This only reads it.
+fn file_position(h: HANDLE) -> Option<u64> {
+    let mut iosb = IO_STATUS_BLOCK { status: 0, information: 0 };
+    let mut pos: i64 = 0;
+    let st = unsafe {
+        NtQueryInformationFile(h, &mut iosb, &mut pos as *mut i64 as *mut _, 8, FILE_POSITION_INFORMATION)
+    };
+    (st >= 0).then_some(pos as u64)
+}
+
+/// Move `h`, a file handle that programs we started may be writing through, to the end of its
+/// file if it isn't there, that is if another handle to the file has appended since. Moving
+/// it there takes two calls (SetFilePointerEx reads the length, then sets the position), so a
+/// write through `h` in between would be undone; leaving the position alone when it is at the
+/// end keeps that to the case where it was behind anyway. The length is read first: writes
+/// through `h` only move the position forward, so they can't make it look behind.
+pub fn seek_end_if_behind(h: HANDLE) {
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileInformationByHandle(h, &mut info) } == 0 {
+        return;
+    }
+    let len = ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64;
+    if file_position(h).is_some_and(|pos| pos < len) {
+        unsafe { SetFilePointerEx(h, 0, std::ptr::null_mut(), FILE_END) };
+    }
+}
 
 fn valid(h: HANDLE) -> bool {
     !h.is_null() && h as isize != -1
@@ -244,11 +275,12 @@ fn is_append_only(h: HANDLE) -> bool {
 
 /// Move stdout or stderr to the end of its file if `make_append_only_stdio_writable`
 /// replaced it, as O_APPEND would before a write. Called before we write to it and before
-/// a child inherits it.
+/// a child inherits it, while children started before may still be writing through it, so
+/// only when another handle has appended since (`seek_end_if_behind`).
 pub fn seek_std_append(n: DWORD) {
     let flag = if n == STD_ERROR_HANDLE { &STDERR_APPEND } else { &STDOUT_APPEND };
     if flag.load(Ordering::Relaxed) {
-        unsafe { SetFilePointerEx(std_handle(n), 0, std::ptr::null_mut(), FILE_END) };
+        seek_end_if_behind(std_handle(n));
     }
 }
 

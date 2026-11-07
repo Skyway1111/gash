@@ -435,16 +435,9 @@ impl Handle {
             Handle::File(f) => (Stdio::from(f.try_clone()?), None),
             Handle::Append(f) => {
                 // Writes through this handle leave its position at the end (see `write_all`), so it
-                // needs moving only when another handle to the file has appended since. Seeking
-                // every time could move it back over output that a program still writing through
-                // it adds meanwhile. The length is read first: writers on this handle only move
-                // the position forward, so they can't make it look behind.
-                let mut g = &**f;
-                if let (Ok(len), Ok(pos)) = (f.metadata().map(|m| m.len()), g.stream_position()) {
-                    if pos < len {
-                        let _ = g.seek(SeekFrom::End(0));
-                    }
-                }
+                // needs moving only when another handle to the file has appended since. Programs
+                // started with it before may still be writing through it.
+                sys::seek_end_if_behind(f.as_raw_handle() as sys::HANDLE);
                 (Stdio::from(f.try_clone()?), None)
             }
             Handle::PipeR(p) => (Stdio::from(p.try_clone()?), None),
