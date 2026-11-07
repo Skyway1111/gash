@@ -123,6 +123,39 @@ fn add_msys_args(cmd: &mut Proc, program: &Path, args: Vec<String>) -> Option<st
     None
 }
 
+/// The MSYS runtime globs each quoted argument it gets from a native parent through an
+/// 8,192-character buffer (glob.cc's MAXPATHLEN), so longer ones arrive cut short.
+const MSYS_GLOB_MAX: usize = 8_000;
+
+/// Command for MSYS program `prog` with `args`, run as `typed` (its argv[0]) if given. Also
+/// returns `add_msys_args`'s response file and the `MSYS` value to give the command, when it
+/// isn't `msys`, the shell's. An argument too long for the runtime's globbing goes through Git's
+/// MSYS `env` with `noglob`, which takes its command line intact, restores `msys` and runs the
+/// program, which gets its arguments from an MSYS parent unparsed.
+fn msys_cmd(typed: Option<&str>, prog: &Path, args: &[String], msys: Option<String>) -> (Proc, Option<std::fs::File>, Option<String>) {
+    if args.iter().any(|a| a.len() > MSYS_GLOB_MAX) {
+        let env = path::mounts().root.join(r"usr\bin\env.exe");
+        if env.is_file() {
+            let mut a = match &msys {
+                Some(v) => vec![format!("MSYS={v}")],
+                None => vec!["-u".into(), "MSYS".into()],
+            };
+            a.push(typed.map_or_else(|| path::to_posix(prog), str::to_string));
+            a.extend_from_slice(args);
+            let mut cmd = Proc::new(&env);
+            // Without globbing, `"` and `'` each delimit a literal run, with no escapes.
+            let rsp = add_msys_args(&mut cmd, &env, a.iter().map(|s| format!("\"{}\"", s.replace('"', "\"'\"'\""))).collect());
+            return (cmd, rsp, Some(msys.map_or("noglob".into(), |v| format!("{v} noglob"))));
+        }
+    }
+    let mut cmd = match typed {
+        Some(t) => Proc::new(t),
+        None => Proc::new(prog),
+    };
+    let rsp = add_msys_args(&mut cmd, prog, args.iter().map(|a| msys_quote(a)).collect());
+    (cmd, rsp, None)
+}
+
 /// Quote an argument for an MSYS2/Cygwin program started from a native process
 /// (whose runtime re-parses the command line with globbing).
 pub fn msys_quote(a: &str) -> String {
@@ -1531,6 +1564,7 @@ impl Shell {
         }
         // The arguments of an MSYS program, when they are too long for a command line.
         let mut rsp: Option<std::fs::File> = None;
+        let mut msys_env: Option<String> = None;
         let mut cmd;
         let native;
         let mut msys_child = false;
@@ -1601,8 +1635,8 @@ impl Shell {
                 let typed = &argv[0];
                 let fname = res.path.file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default();
                 let same = !has_path_sep(typed) && (fname == typed.to_lowercase() || fname == format!("{}.exe", typed.to_lowercase()));
-                cmd = if same && !assigns.iter().any(|(k, _)| k == "PATH") { Proc::new(typed) } else { Proc::new(&res.path) };
-                rsp = add_msys_args(&mut cmd, &res.path, argv[1..].iter().map(|a| msys_quote(a)).collect());
+                let typed = (same && !assigns.iter().any(|(k, _)| k == "PATH")).then_some(typed.as_str());
+                (cmd, rsp, msys_env) = msys_cmd(typed, &res.path, &argv[1..], env_var("MSYS"));
                 native = false;
                 msys_child = true;
             }
@@ -1619,7 +1653,6 @@ impl Shell {
             }
             ExeKind::Interp => {
                 let (ip, ik, iarg) = res.interp.clone().unwrap();
-                cmd = Proc::new(&ip);
                 let msys = ik == ExeKind::Msys;
                 let mut args: Vec<String> = Vec::new();
                 if let Some(a) = iarg {
@@ -1628,8 +1661,9 @@ impl Shell {
                 args.push(if msys { path::to_posix(&res.path) } else { res.path.to_string_lossy().into_owned() });
                 args.extend(argv[1..].iter().cloned());
                 if msys {
-                    rsp = add_msys_args(&mut cmd, &ip, args.iter().map(|a| msys_quote(a)).collect());
+                    (cmd, rsp, msys_env) = msys_cmd(None, &ip, &args, env_var("MSYS"));
                 } else {
+                    cmd = Proc::new(&ip);
                     for a in &args {
                         cmd.arg(conv(a));
                     }
@@ -1642,6 +1676,9 @@ impl Shell {
         cmd.env_clear();
         for (k, v) in self.child_env(assigns, native) {
             cmd.env(k, v);
+        }
+        if let Some(v) = msys_env {
+            cmd.env("MSYS", v);
         }
         let mut pumps = Vec::new();
         // Here-doc input lent to the child as a file (see `MemReader::lend_file`).

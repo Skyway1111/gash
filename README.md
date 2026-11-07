@@ -83,7 +83,8 @@ by real Git Bash) passes 100%. Supported:
   honoring `MSYS_NO_PATHCONV` and `MSYS2_ARG_CONV_EXCL` when they are exported or given as
   a command prefix (`MSYS_NO_PATHCONV=1 cmd ...`), as in Git Bash.
 - Arguments to MSYS programs are quoted so the MSYS runtime doesn't glob/brace/tilde-expand
-  or `@file`-expand them.
+  or `@file`-expand them. Its globbing would cut an argument past 8 KB short, so such a
+  command goes through Git's `env` started with `MSYS=noglob`, which passes it on intact.
 - Executables are found with or without `.exe`/`.com`/`.bat`/`.cmd`; extensionless files with a
   `#!` line are run via their interpreter (`#!/usr/bin/env node`, `#!/usr/bin/python3`, ...).
 - `$(...)` strips trailing `\r\n` like MSYS2 bash, so output of Windows programs is clean.
