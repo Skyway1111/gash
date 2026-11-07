@@ -169,6 +169,7 @@ pub mod sho {
     sh_idx!(inherit_errexit, "inherit_errexit");
     sh_idx!(lastpipe, "lastpipe");
     sh_idx!(login_shell, "login_shell");
+    sh_idx!(restricted_shell, "restricted_shell");
     sh_idx!(nocaseglob, "nocaseglob");
     sh_idx!(nocasematch, "nocasematch");
     sh_idx!(nullglob, "nullglob");

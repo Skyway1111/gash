@@ -914,7 +914,8 @@ fn shopt(sh: &mut Shell, args: &[String]) -> R {
                 Some(i) => {
                     if oflag {
                         sh.o[i] = v
-                    } else {
+                    } else if i != sho::login_shell() && i != sho::restricted_shell() {
+                        // Read-only: as in bash, setting them succeeds and changes nothing.
                         sh.sh[i] = v
                     }
                 }
@@ -931,7 +932,7 @@ fn shopt(sh: &mut Shell, args: &[String]) -> R {
                     if print {
                         out.push_str(&format!("shopt {} {}\n", if *on { "-s" } else { "-u" }, n));
                     } else {
-                        out.push_str(&format!("{:<23}\t{}\n", n, if *on { "on" } else { "off" }));
+                        out.push_str(&format!("{:<15}\t{}\n", n, if *on { "on" } else { "off" }));
                     }
                 }
             }
@@ -968,7 +969,7 @@ fn shopt(sh: &mut Shell, args: &[String]) -> R {
                     out.push_str(&format!("shopt {} {}\n", if *on { "-s" } else { "-u" }, n));
                 }
             } else {
-                out.push_str(&format!("{:<23}\t{}\n", n, if *on { "on" } else { "off" }));
+                out.push_str(&format!("{:<15}\t{}\n", n, if *on { "on" } else { "off" }));
             }
         }
     }
