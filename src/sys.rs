@@ -78,6 +78,8 @@ extern "system" {
     pub fn SetStdHandle(n: DWORD, h: HANDLE) -> BOOL;
     pub fn SetFilePointerEx(h: HANDLE, dist: i64, new_pos: *mut i64, method: DWORD) -> BOOL;
     pub fn GetFileInformationByHandle(h: HANDLE, info: *mut BY_HANDLE_FILE_INFORMATION) -> BOOL;
+    pub fn GetFileInformationByHandleEx(h: HANDLE, class: u32, info: *mut core::ffi::c_void, size: DWORD) -> BOOL;
+    pub fn GetCompressedFileSizeW(name: *const u16, high: *mut DWORD) -> DWORD;
     fn CreatePipe(read: *mut HANDLE, write: *mut HANDLE, sa: *mut core::ffi::c_void, size: DWORD) -> BOOL;
 }
 

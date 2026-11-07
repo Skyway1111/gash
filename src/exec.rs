@@ -1600,6 +1600,16 @@ impl Shell {
         let excl: Vec<String> = env_var("MSYS2_ARG_CONV_EXCL")
             .map(|v| v.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
             .unwrap_or_default();
+        // Git's GNU du, found by PATH lookup: sizes from directory listings (see du.rs).
+        if res.kind == ExeKind::Msys
+            && !self.spawn_only
+            && !has_path_sep(&argv[0])
+            && res.path.file_stem().is_some_and(|s| s.eq_ignore_ascii_case("du"))
+        {
+            if let Some(r) = crate::du::run(self, &argv[1..], &env_var) {
+                return r;
+            }
+        }
         let conv = |a: &str| -> String {
             if no_conv || excl.iter().any(|e| e == "*" || a.starts_with(e.as_str())) {
                 a.to_string()
