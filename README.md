@@ -130,6 +130,10 @@ This also installs Git for Windows if winget doesn't find it. Or download
 [Releases](https://github.com/hex2f/gash/releases) and unzip it anywhere. `gash.exe` is a single
 file with no runtime dependencies besides Git for Windows' tools.
 
+### macOS and Linux
+
+You already have it installed. It's called `bash`.
+
 ## Building
 
 ```bash
